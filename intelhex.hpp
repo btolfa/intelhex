@@ -7,7 +7,7 @@
 
 #include <string>
 
-namespace ih {
+namespace intelhex {
 
 class IntelHex {
 public:
