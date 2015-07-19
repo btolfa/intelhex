@@ -6,7 +6,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include "IntelHex.hpp"
+#include "intelhex.hpp"
 
 namespace {
 class IntelHexTest : public ::testing::Test {

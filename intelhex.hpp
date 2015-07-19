@@ -9,11 +9,8 @@
 
 namespace ih {
 
-class intelhex {
+class IntelHex {
 public:
-    intelhex(std::string const& path) {
-    }
-private:
 
 };
 

@@ -72,7 +72,7 @@ if(OPTION_BUILD_TESTS)
         optimized ${binary_dir}/gtest/ReleaseLibs/${CMAKE_FIND_LIBRARY_PREFIXES}gtest.a
         optimized ${binary_dir}/gtest/ReleaseLibs/${CMAKE_FIND_LIBRARY_PREFIXES}gtest_main.a)
 
-    set(TEST_SOURCES tests/intelhexTest.cpp IntelHex.hpp IntelHexErrors.hpp)
+    set(TEST_SOURCES tests/intelhexTest.cpp intelhex.hpp IntelHexErrors.hpp)
 
     include_directories(${GTEST_INCLUDE_DIRS} ${GMOCK_INCLUDE_DIRS} .)
 
