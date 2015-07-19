@@ -241,6 +241,27 @@ public:
         segmentBaseAddress = convertTo<std::uint16_t>(record.cbegin() + 4) << 16;
     }
 
+    void checkStartLinearAddressOrThrow(const record_t &record) {
+        if (getRECLEN(record) != 4) {
+            throw StartLinearAddressRecordError("Incorrect length of Start Linear Address Record");
+        }
+
+        if (startLinearAddress) {
+            throw DuplicateStartAddressRecordError("Duplicate Start Linear Address Record");
+        }
+
+        if (startSegmentAddress) {
+            throw DuplicateStartAddressRecordError("Duplicate Start Address, already defined start Start Segment Address Record");
+        }
+    }
+
+
+    void precessStartLinearAddress(const record_t &record) {
+        checkStartLinearAddressOrThrow(record);
+
+        startLinearAddress = convertTo<std::uint32_t>(record.cbegin() + 4);
+    }
+
     void processRecord(record_t const &record) {
         switch (getTYPEREC(record)) {
             case typerec_t::DataRecord:
@@ -256,6 +277,7 @@ public:
                 processExtendedSegmentAddress(record);
                 break;
             case typerec_t::StartLinearAddressRecord:
+                precessStartLinearAddress(record);
                 break;
             case typerec_t::StartSegmentAddressRecord:
                 processStartSegmentAddress(record);
