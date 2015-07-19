@@ -15,28 +15,14 @@ set(META_AUTHOR_MAINTAINER   "btolfa@gmail.com")
 string(TOUPPER ${META_PROJECT_NAME} META_PROJECT_NAME_UPPER)
 
 # Set project name and type (C/C++)
-project(${META_PROJECT_NAME} CXX)
+project(${META_PROJECT_NAME})
 
 # Configuration options
 option(OPTION_BUILD_TESTS "Build tests." ON)
-option(OPTION_PEDANTIC "Enable extra warnings and expensive tests." OFF)
 
-include(CheckCXXCompilerFlag)
-check_cxx_compiler_flag(-std=c++14 HAVE_STD_CPP14_FLAG)
-
-if (HAVE_STD_CPP14_FLAG)
-    if (MSVC)
-        list(APPEND CMAKE_CXX_FLAGS "-std=c++14")
-    endif()
-endif()
-
-if (OPTION_PEDANTIC)
-    if (MSVC)
-        list(APPEND CMAKE_CXX_FLAGS "/W4 /W44640")
-    else()
-        list(APPEND CMAKE_CXX_FLAGS "-Wall -Wextra -Wshadow -Wnon-virtual-dtor -pedantic")
-    endif()
-endif()
+find_package(Boost REQUIRED)
+include_directories(${BOOST_INCLUDEDIRS})
+list(APPEND CMAKE_CXX_FLAGS "-std=c++14 -Wall -Wextra -Wshadow -Wnon-virtual-dtor -pedantic")
 
 if(OPTION_BUILD_TESTS)
     enable_testing()
@@ -86,7 +72,7 @@ if(OPTION_BUILD_TESTS)
         optimized ${binary_dir}/gtest/ReleaseLibs/${CMAKE_FIND_LIBRARY_PREFIXES}gtest.a
         optimized ${binary_dir}/gtest/ReleaseLibs/${CMAKE_FIND_LIBRARY_PREFIXES}gtest_main.a)
 
-    set(TEST_SOURCES tests/intelhexTest.cpp intelhex.hpp)
+    set(TEST_SOURCES tests/intelhexTest.cpp IntelHex.hpp IntelHexErrors.hpp)
 
     include_directories(${GTEST_INCLUDE_DIRS} ${GMOCK_INCLUDE_DIRS} .)
 
@@ -94,5 +80,5 @@ if(OPTION_BUILD_TESTS)
     add_dependencies(intelhex-test googlemock)
     target_link_libraries(intelhex-test ${GTEST_BOTH_LIBRARIES} ${GMOCK_BOTH_LIBRARIES})
 
-    add_test(NAME intelhex-test COMMAND intelhex-test )
+    add_test(NAME intelhex-test COMMAND intelhex-test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 endif()
