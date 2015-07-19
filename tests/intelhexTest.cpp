@@ -34,10 +34,11 @@ TEST_F(IntelHexTest, ShouldDecodeRecord) {
 }
 
 TEST_F(IntelHexTest, ShouldThrowIfInvalidRecord) {
+    intelhex::IntelHex intelHex;
 
-    EXPECT_THROW(intelhex::checkRecordOrThrow(std::vector<std::uint8_t>{0x02, 0x00, 0x00, 0x01, 0xFF}), intelhex::RecordLengthError);
-    EXPECT_THROW(intelhex::checkRecordOrThrow(std::vector<std::uint8_t>{0x00, 0x00, 0x00, 0xFF, 0xFF}), intelhex::RecordTypeError);
-    EXPECT_THROW(intelhex::checkRecordOrThrow(std::vector<std::uint8_t>{0x00, 0x00, 0x00, 0x01, 0x00}), intelhex::RecordChecksumError);
+    EXPECT_THROW(intelHex.factoryRecord(":02000001FF")->checkOrThrow(), intelhex::RecordLengthError);
+    EXPECT_THROW(intelHex.factoryRecord(":000000FFFF")->checkOrThrow(), intelhex::RecordTypeError);
+    EXPECT_THROW(intelHex.factoryRecord(":0000000100")->checkOrThrow(), intelhex::RecordChecksumError);
 
     EXPECT_TRUE(intelhex::isCorrectChecksum(intelhex::decodeRecord(":1004E300CFF0FBE2FDF220FF20F2E120E2FBE6F396")));
 

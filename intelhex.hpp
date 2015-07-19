@@ -9,6 +9,7 @@
 #include <istream>
 #include <vector>
 #include <map>
+#include <memory>
 
 #include <boost/range/algorithm/for_each.hpp>
 #include <boost/range/numeric.hpp>
@@ -21,7 +22,7 @@
 
 namespace intelhex {
 
-using record_t = std::vector<std::uint8_t>;
+using record_container_t = std::vector<std::uint8_t>;
 
 enum class typerec_t : std::uint8_t {
     DataRecord = 0,
@@ -99,7 +100,7 @@ std::vector<std::uint8_t> decodeRecord(const std::string &line) {
     return result;
 }
 
-std::uint8_t getRECLEN(record_t const &record) noexcept {
+std::uint8_t getRECLEN(record_container_t const &record) noexcept {
     return record[0];
 }
 
@@ -112,45 +113,18 @@ void checkTYPEREC(const std::uint8_t field) {
     }
 }
 
-typerec_t getTYPEREC(record_t const &record) {
+typerec_t getTYPEREC(record_container_t const &record) {
     std::uint8_t field = record[3];
     checkTYPEREC(field);
     return static_cast<typerec_t>(field);
 }
 
-std::uint16_t getOFFSET(record_t const &record) noexcept {
+std::uint16_t getOFFSET(record_container_t const &record) noexcept {
     return convertTo<std::uint16_t>(record.cbegin() + 1);
 }
 
-bool isCorrectChecksum(record_t const &record) {
+bool isCorrectChecksum(record_container_t const &record) {
     return (boost::accumulate(record, static_cast<std::uint8_t>(0)) == 0);
-}
-
-void checkRecordOrThrow(record_t const &record) {
-// Служебные данные занимают RECLEN(1) + OFFSET(2) + RECTYP(1) + CHKSUM(1) = 5 байт, данные дожны занимать RECLEN байт
-// т.е. длина вектора не должны быть равно 5 + RECLEN
-    if (record.size() != (getRECLEN(record) + 5u)) {
-        throw RecordLengthError(std::string("Record length invalid: ") + std::to_string(record.size()) +
-                                "but should be " + std::to_string(getRECLEN(record) + 5));
-    }
-
-    getTYPEREC(record);
-
-    if (!isCorrectChecksum(record)) {
-        throw RecordChecksumError("Record checksum invalid");
-    }
-}
-
-void checkExtendedSegmentAddressOrThrow(const record_t &record) {
-    if (getRECLEN(record) != 2) {
-        throw ExtendedSegmentAddressRecordError("Incorrect length of Extended Segment Address Record");
-    }
-}
-
-void checkExtendedLinearAddressOrThrow(const record_t &record) {
-    if (getRECLEN(record) != 2) {
-        throw ExtendedLinearAddressRecordError("Incorrect length of Extended Linear Address Record");
-    }
 }
 
 class IntelHex {
@@ -174,129 +148,196 @@ public:
         }
     }
 
-    void processData(const record_t &record) {
-        /* Calculate new SBA by clearing the low four bytes and then adding the   */
-        /* current loadOffset for this line of Intel HEX data                     */
-        segmentBaseAddress &= ~(0xFFFFUL);
-        segmentBaseAddress += getOFFSET(record);
-
-        // save data from record to memory
-        boost::for_each(record | boost::adaptors::sliced(4, 4 + getRECLEN(record)) |
-                        boost::adaptors::indexed(segmentBaseAddress),
-                        [this](const auto &element) {
-                            this->saveByte(element.index(), element.value());
-                        });
-
-        segmentBaseAddress += getRECLEN(record);
-    }
-
-    void checkEndOfFileOrThrow(const record_t &record) const {
-        if (record != record_t{00, 00, 00, 01, 0xFF}) {
-            throw EOFRecordError("Invalid End Of File Record");
+    class Record {
+    public:
+        Record (record_container_t r, IntelHex &hex) : record{std::move(r)}, ih{hex} {
         }
 
-        if (foundEOF) {
-            throw HexRecordError("Additional End Of File record found");
-        }
-    }
+        virtual ~Record() = default;
 
-    void processEndOfFile(const record_t &record) {
-        checkEndOfFileOrThrow(record);
-        foundEOF = true;
-    }
+        virtual void checkOrThrow() const {
+            // Служебные данные занимают RECLEN(1) + OFFSET(2) + RECTYP(1) + CHKSUM(1) = 5 байт, данные дожны занимать RECLEN байт
+            // т.е. длина вектора не должны быть равно 5 + RECLEN
+            if (record.size() != (getRECLEN(record) + 5u)) {
+                throw RecordLengthError(std::string("Record length invalid: ") + std::to_string(record.size()) +
+                                        "but should be " + std::to_string(getRECLEN(record) + 5));
+            }
 
-    void processExtendedSegmentAddress(const record_t &record) {
-        checkExtendedSegmentAddressOrThrow(record);
+            getTYPEREC(record);
 
-        /* ESA is bits 4-19 of the segment base address   */
-        /* (SBA), so shift left 4 bits                    */
-        segmentBaseAddress = convertTo<std::uint16_t>(record.cbegin() + 4) << 4;
-    }
-
-    void checkStartSegmentAddressOrThrow(const record_t &record) const {
-        if (getRECLEN(record) != 4) {
-            throw StartSegmentAddressRecordError("Incorrect length of Start Segment Address Record");
+            if (!isCorrectChecksum(record)) {
+                throw RecordChecksumError("Record checksum invalid");
+            }
         }
 
-        if (startSegmentAddress) {
-            throw DuplicateStartAddressRecordError("Duplicate Start Segment Address Record");
+        virtual void process() = 0;
+    protected:
+        record_container_t record;
+        IntelHex & ih;
+    };
+
+    class DataRecord : public Record {
+    public:
+        using Record::Record;
+
+        virtual void process() override {
+            /* Calculate new SBA by clearing the low four bytes and then adding the   */
+            /* current loadOffset for this line of Intel HEX data                     */
+            ih.segmentBaseAddress &= ~(0xFFFFUL);
+            ih.segmentBaseAddress += getOFFSET(record);
+
+            // save data from record to memory
+            boost::for_each(record | boost::adaptors::sliced(4, 4 + getRECLEN(record)) |
+                            boost::adaptors::indexed(ih.segmentBaseAddress),
+                            [this](const auto &element) {
+                                this->ih.saveByte(element.index(), element.value());
+                            });
+
+            ih.segmentBaseAddress += getRECLEN(record);
+        }
+    };
+
+    class EndOfFileRecord : public Record {
+        using Record::Record;
+
+        virtual void checkOrThrow() const override {
+            Record::checkOrThrow();
+
+            if (record != record_container_t{00, 00, 00, 01, 0xFF}) {
+                throw EOFRecordError("Invalid End Of File Record");
+            }
+
+            if (ih.foundEOF) {
+                throw HexRecordError("Additional End Of File record found");
+            }
         }
 
-    }
+        virtual void process() override {
+            ih.foundEOF = true;
+        }
+    };
 
-    void processStartSegmentAddress(const record_t &record) {
-        checkStartSegmentAddressOrThrow(record);
-        startSegmentAddress.emplace(
-                convertTo<std::uint16_t>(record.cbegin() + 4), // cs
-                convertTo<std::uint16_t>(record.cbegin() + 6)  // ip
-        );
+    class ExtendedSegmentAddressRecord : public Record {
+        using Record::Record;
 
-    }
+        virtual void checkOrThrow() const override {
+            Record::checkOrThrow();
 
-    void processExtendedLinearAddress(const record_t &record) {
-        checkExtendedLinearAddressOrThrow(record);
-
-        /* ELA is bits 16-31 of the segment base address  */
-        /* (SBA), so shift left 16 bits                   */
-        segmentBaseAddress = convertTo<std::uint16_t>(record.cbegin() + 4) << 16;
-    }
-
-    void checkStartLinearAddressOrThrow(const record_t &record) {
-        if (getRECLEN(record) != 4) {
-            throw StartLinearAddressRecordError("Incorrect length of Start Linear Address Record");
+            if (getRECLEN(record) != 2) {
+                throw ExtendedSegmentAddressRecordError("Incorrect length of Extended Segment Address Record");
+            }
         }
 
-        if (startLinearAddress) {
-            throw DuplicateStartAddressRecordError("Duplicate Start Linear Address Record");
+        virtual void process() override {
+            /* ESA is bits 4-19 of the segment base address   */
+            /* (SBA), so shift left 4 bits                    */
+            ih.segmentBaseAddress = convertTo<std::uint16_t>(record.cbegin() + 4) << 4;
+        }
+    };
+
+    class StartSegmentAddressRecord : public Record {
+        using Record::Record;
+
+        virtual void checkOrThrow() const override {
+            Record::checkOrThrow();
+
+            if (getRECLEN(record) != 4) {
+                throw StartSegmentAddressRecordError("Incorrect length of Start Segment Address Record");
+            }
+
+            if (ih.startSegmentAddress) {
+                throw DuplicateStartAddressRecordError("Duplicate Start Segment Address Record");
+            }
         }
 
-        if (startSegmentAddress) {
-            throw DuplicateStartAddressRecordError("Duplicate Start Address, already defined start Start Segment Address Record");
+        virtual void process() override {
+            ih.startSegmentAddress.emplace(
+                    convertTo<std::uint16_t>(record.cbegin() + 4), // cs
+                    convertTo<std::uint16_t>(record.cbegin() + 6)  // ip
+            );
         }
-    }
+    };
 
+    class ExtendedLinearAddressRecord : public Record {
+        using Record::Record;
 
-    void precessStartLinearAddress(const record_t &record) {
-        checkStartLinearAddressOrThrow(record);
+        virtual void checkOrThrow() const override {
+            Record::checkOrThrow();
 
-        startLinearAddress = convertTo<std::uint32_t>(record.cbegin() + 4);
-    }
+            if (getRECLEN(record) != 2) {
+                throw ExtendedLinearAddressRecordError("Incorrect length of Extended Linear Address Record");
+            }
+        }
 
-    void processRecord(record_t const &record) {
+        virtual void process() override {
+            /* ELA is bits 16-31 of the segment base address  */
+            /* (SBA), so shift left 16 bits                   */
+            ih.segmentBaseAddress = convertTo<std::uint16_t>(record.cbegin() + 4) << 16;
+        }
+    };
+
+    class StartLinearAddressRecord : public Record {
+        using Record::Record;
+
+        virtual void checkOrThrow() const override {
+            Record::checkOrThrow();
+
+            if (getRECLEN(record) != 4) {
+                throw StartLinearAddressRecordError("Incorrect length of Start Linear Address Record");
+            }
+
+            if (ih.startLinearAddress) {
+                throw DuplicateStartAddressRecordError("Duplicate Start Linear Address Record");
+            }
+
+            if (ih.startSegmentAddress) {
+                throw DuplicateStartAddressRecordError("Duplicate Start Address, already defined start Start Segment Address Record");
+            }
+        }
+
+        virtual void process() override {
+            /* Extract the four bytes of the SLA              */
+            ih.startLinearAddress = convertTo<std::uint32_t>(record.cbegin() + 4);
+        }
+    };
+
+    std::unique_ptr<Record> factoryRecord(std::string const & line) {
+        auto record = decodeRecord(line);
         switch (getTYPEREC(record)) {
             case typerec_t::DataRecord:
-                processData(record);
+                return std::make_unique<DataRecord>(std::move(record), *this);
                 break;
             case typerec_t::EndOfFileRecord:
-                processEndOfFile(record);
+                return std::make_unique<EndOfFileRecord>(std::move(record), *this);
                 break;
             case typerec_t::ExtendedLinearAddressRecord:
-                processExtendedLinearAddress(record);
+                return std::make_unique<ExtendedLinearAddressRecord>(std::move(record), *this);
                 break;
             case typerec_t::ExtendedSegmentAddressRecord:
-                processExtendedSegmentAddress(record);
+                return std::make_unique<ExtendedSegmentAddressRecord>(std::move(record), *this);
                 break;
             case typerec_t::StartLinearAddressRecord:
-                precessStartLinearAddress(record);
+                return std::make_unique<StartLinearAddressRecord>(std::move(record), *this);
                 break;
             case typerec_t::StartSegmentAddressRecord:
-                processStartSegmentAddress(record);
+                return std::make_unique<StartSegmentAddressRecord>(std::move(record), *this);
                 break;
         }
+        throw HexReaderError("Unexpected type of record");
     }
 
     void parseLine(std::string const &line) {
-        auto record = decodeRecord(line);
-        checkRecordOrThrow(record);
-        processRecord(record);
+        auto record = factoryRecord(line);
+        record->checkOrThrow();
+        record->process();
     }
 
 private:
     /// Stores segment base address of Intel HEX file.
     std::uint32_t segmentBaseAddress{0};
 
-    struct StartSegmentAddress_t {
-        StartSegmentAddress_t(const std::uint16_t cs_, const std::uint16_t ip_) : cs{cs_}, ip{ip_} {}
+    struct StartSegmentAddress {
+        StartSegmentAddress(const std::uint16_t cs_, const std::uint16_t ip_) : cs{cs_}, ip{ip_} {}
         /// content of the CS register
         std::uint16_t cs{0};
         /// content of the IP register
@@ -304,7 +345,7 @@ private:
     };
 
     /// Stores the content of the CS/IP Registers, if used.
-    boost::optional<StartSegmentAddress_t> startSegmentAddress;
+    boost::optional<StartSegmentAddress> startSegmentAddress;
 
     /// Stores the content of the EIP Register, if used.
     boost::optional<std::uint32_t> startLinearAddress;
