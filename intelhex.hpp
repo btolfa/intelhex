@@ -8,9 +8,12 @@
 #include <string>
 #include <istream>
 #include <vector>
+#include <map>
 
 #include <boost/range/algorithm/for_each.hpp>
 #include <boost/range/numeric.hpp>
+#include <boost/range/adaptor/sliced.hpp>
+#include <boost/range/adaptor/indexed.hpp>
 
 #include <boost/optional.hpp>
 
@@ -20,13 +23,14 @@ namespace intelhex {
 
 class IntelHex {
 public:
-    using record_t = std::vector<uint8_t>;
+    using record_t = std::vector<std::uint8_t>;
+    using content_t = std::map<std::uint32_t, std::uint8_t>;
 
     enum class typerec_t : std::uint8_t {
         DataRecord = 0,
-        EndofFileRecord,
+        EndOfFileRecord,
         ExtendedSegmentAddressRecord,
-        StartSegmentAddressRecor,
+        StartSegmentAddressRecord,
         ExtendedLinearAddressRecord,
         StartLinearAddressRecord
     };
@@ -106,9 +110,12 @@ public:
         return static_cast<typerec_t>(field);
     }
 
+    std::uint16_t getOFFSET(record_t const& record) const {
+        return (static_cast<std::uint16_t>(record[1]) << 8) | static_cast<std::uint16_t>(record[2]);
+    }
 
     bool isCorrectChecksum(record_t const& record) const {
-        return (boost::accumulate(record, 0) == 0);
+        return (boost::accumulate(record, static_cast<std::uint8_t>(0)) == 0);
     }
 
     void checkCorrectnessOfRecordOrThrow(record_t const &record) const {
@@ -128,11 +135,33 @@ public:
 
     }
 
+    void saveByte(const std::uint32_t address, const std::uint8_t value) {
+        if (content.emplace(std::make_pair(address, value)).second) {
+            throw AddressOverlapError(std::string("Trying to save to data with overlaped addressed: ") + std::to_string(address));
+        }
+    }
+
+    void parseData(const record_t &record) {
+        /* Calculate new SBA by clearing the low four bytes and then adding the   */
+        /* current loadOffset for this line of Intel HEX data                     */
+        segmentBaseAddress &= ~(0xFFFFUL);
+        segmentBaseAddress += getOFFSET(record);
+
+        // save data from record to memory
+        boost::for_each(record | boost::adaptors::sliced(4, 4 + getRECLEN(record)) | boost::adaptors::indexed(segmentBaseAddress),
+                        [this](const auto & element){
+                            this->saveByte(element.index(), element.value());
+                        });
+
+        segmentBaseAddress += getRECLEN(record);
+    }
+
     void parseRecord(record_t const &record) {
         switch (getTYPEREC(record)) {
             case typerec_t::DataRecord:
+                parseData(record);
                 break;
-            case typerec_t::EndofFileRecord:
+            case typerec_t::EndOfFileRecord:
                 break;
             case typerec_t::ExtendedLinearAddressRecord:
                 break;
@@ -140,7 +169,7 @@ public:
                 break;
             case typerec_t::StartLinearAddressRecord:
                 break;
-            case typerec_t::StartSegmentAddressRecor:
+            case typerec_t::StartSegmentAddressRecord:
                 break;
         }
     }
@@ -167,6 +196,7 @@ private:
 
     /// Stores the content of the EIP Register, if used.
     boost::optional<std::uint32_t> startLinearAddress;
-};
 
+    content_t content;
+};
 }

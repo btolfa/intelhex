@@ -43,6 +43,13 @@ TEST_F(IntelHexTest, ShouldThrowIfInvalidRecord) {
     EXPECT_THROW(intelHex.checkCorrectnessOfRecordOrThrow(std::vector<std::uint8_t>{0x02, 0x00, 0x00, 0x01, 0xFF}), intelhex::RecordLengthError);
     EXPECT_THROW(intelHex.checkCorrectnessOfRecordOrThrow(std::vector<std::uint8_t>{0x00, 0x00, 0x00, 0xFF, 0xFF}), intelhex::RecordTypeError);
     EXPECT_THROW(intelHex.checkCorrectnessOfRecordOrThrow(std::vector<std::uint8_t>{0x00, 0x00, 0x00, 0x01, 0x00}), intelhex::RecordChecksumError);
+
+    EXPECT_TRUE(intelHex.isCorrectChecksum(intelHex.decodeRecord(":1004E300CFF0FBE2FDF220FF20F2E120E2FBE6F396")));
+
+    EXPECT_THROW({
+        intelHex.parseLine(":1004E300CFF0FBE2FDF220FF20F2E120E2FBE6F396");
+        intelHex.parseLine(":1004E300CFF0FBE2FDF220FF20F2E120E2FBE6F396");
+                 }, intelhex::AddressOverlapError);
 }
 
 }
