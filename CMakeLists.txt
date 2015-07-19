@@ -21,7 +21,7 @@ project(${META_PROJECT_NAME})
 option(OPTION_BUILD_TESTS "Build tests." ON)
 
 find_package(Boost REQUIRED)
-include_directories(${BOOST_INCLUDEDIRS})
+include_directories(${Boost_INCLUDE_DIRS})
 list(APPEND CMAKE_CXX_FLAGS "-std=c++14 -Wall -Wextra -Wshadow -Wnon-virtual-dtor -pedantic")
 
 if(OPTION_BUILD_TESTS)
